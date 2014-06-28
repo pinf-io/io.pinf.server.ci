@@ -4,7 +4,10 @@
   "private": true,
   "pm": "npm",
   "dependencies": {
-    "smi.cli": "0.x"
+    "smi.cli": "0.x",
+    "waitfor": "~0.1.3",
+    "request": "~2.33.0",
+    "parse-link-header": "~0.1.0"
   },
   "scripts": {
     "install": "./node_modules/.bin/smi install"
