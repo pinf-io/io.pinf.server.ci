@@ -7,6 +7,7 @@
     "smi.cli": "0.x",
     "waitfor": "~0.1.3",
     "request": "~2.33.0",
+    "pio": "^0.6",
     "parse-link-header": "~0.1.0"
   },
   "scripts": {
@@ -29,6 +30,11 @@
     },
     "pio.deploy.converter": {
       "name": "nodejs-server"
+    }
+  },
+  "config.plugin": {
+    "io.pinf.server.firewidgets": {
+      "widgets": "./widgets/*"
     }
   }
 }

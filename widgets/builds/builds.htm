@@ -1,0 +1,20 @@
+
+	<tr>
+		<th>Age</th>
+		<th>Repository</th>
+		<th>Branch</th>
+		<th>Commit</th>
+		<th>Status</th>
+		<th>Duration</th>
+	</tr>
+{{ for(var id in it.records) { }}
+	<tr record-id="{{=id}}" class="{{=it.records[id].$style.row}}">
+	    <td>{{=it.records[id].$display.age}}</td>
+	    <td>{{=it.records[id].$display.repository}}</td>
+	    <td>{{=it.records[id].$display.branch}}</td>
+	    <td>{{=it.records[id].$display.commit}}</td>
+	    <td>{{=it.records[id].$display.status}}</td>
+	    <td>{{=it.records[id].$display.duration}}</td>
+	</tr>
+{{ } }}
+
