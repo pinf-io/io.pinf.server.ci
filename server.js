@@ -6,6 +6,7 @@ const WAITFOR = require("waitfor");
 const PARSE_LINK_HEADER = require("parse-link-header");
 const OPENSSL = require("pio/lib/openssl");
 const SSH = require("pio/lib/ssh");
+const SPAWN = require("child_process").spawn;
 
 
 var pioConfig = JSON.parse(FS.readFileSync(PATH.join(__dirname, "../.pio.json")));
@@ -149,7 +150,7 @@ require("io.pinf.server.www").for(module, __dirname, function(app, config, HELPE
     	        // the database and register a github post-commit hook.
 
     	        // TODO: Use pinf-it based data here.
-    			var deployedServices = JSON.parse(FS.readFileSync(PATH.join(__dirname, "../.pio.json"))).config["pio.services"].services;
+    			var deployedServices = JSON.parse(HELPERS.API.FS.readFileSync(PATH.join(__dirname, "../.pio.json"))).config["pio.services"].services;
     			for (var serviceId in deployedServices) {
     				var serviceDescriptor = deployedServices[serviceId].descriptor;
     				if (
@@ -160,7 +161,7 @@ require("io.pinf.server.www").for(module, __dirname, function(app, config, HELPE
     					if (m) {
     						if (config.watch.organizations[m[1]]) {
     							console.log("Watch repository '" + m[1] + "' for organization '" + m[1] + "'.");
-    				        	waitfor(m, function(m, callback) {
+    				        	waitfor(serviceId, m, function(serviceId, m, callback) {
                                     return callGithub(userInfo, "GET", "/repos/" + m[1] + "/" + m[2], function(err, res, repository) {
                                         if (err) return callback(err);
         								return repositoryTable.insert({
@@ -175,7 +176,7 @@ require("io.pinf.server.www").for(module, __dirname, function(app, config, HELPE
                                             return clonesTable.insert({
                                                 id: "/opt/services/" + serviceId + "/clone",
                                                 repository: "github.com/" + m[1] + "/" + m[2],
-                                                branch: "branch2",
+                                                branch: "master",
                                                 path: "/opt/services/" + serviceId + "/clone"
                                             }, {
                                                 upsert: true
@@ -255,7 +256,7 @@ console.log("CHANGES", results);
         if (repository.private === false) {
             // We have a public repo so we don't need a key to pull it.
             console.log("No key needed. Public repo.");
-//            return callback(null, (self._ensureDeployKey__keyPath[keyId] = false));
+            return callback(null, (self._ensureDeployKey__keyPath[keyId] = false));
         }
         var m = repository.id.split("/");
         // We have a private repo so we need to make sure we have a deploy key.
@@ -263,10 +264,10 @@ console.log("CHANGES", results);
             if (err) return callback(err);
 
             function createKey(callback) {
-                if (FS.existsSync(keyPath)) {
+                if (HELPERS.API.FS.existsSync(keyPath)) {
                     return callback(null, keyPath);
                 }
-                if (!FS.existsSync(PATH.dirname(keyPath))) {
+                if (!HELPERS.API.FS.existsSync(PATH.dirname(keyPath))) {
                     HELPERS.API.FS.mkdirsSync(PATH.dirname(keyPath));
                 }
                 console.log("Generating deploy key at:", keyPath);
@@ -280,7 +281,7 @@ console.log("CHANGES", results);
             }
 
             function uploadKey(keyPath, callback) {
-                return FS.readFile(keyPath + ".pub", "utf8", function (err, publicKey) {
+                return HELPERS.API.FS.readFile(keyPath + ".pub", "utf8", function (err, publicKey) {
                     if (err) return callback(err);
                     return callGithub(self._userInfo, "POST", "/repos/" + m[1] + "/" + m[2] + "/keys", {
                         title: "io.pinf.server.ci" + "@" + pioConfig.config.pio.hostname,
@@ -316,7 +317,7 @@ console.log("CHANGES", results);
             });
         });
     }
-var succeedFail = true;    
+
     Builder.prototype._doBuild = function (id, callback) {
         var self = this;
 
@@ -328,101 +329,154 @@ var succeedFail = true;
             if (err) return callback(err);
             return self._r.tableEnsure(DB_NAME, "io_pinf_server_ci", "builds", function(err, buildsTable) {
                 if (err) return callback(err);
-                return buildsTable.get(id).run(self._r.conn, function (err, build) {
+                return self._r.tableEnsure(DB_NAME, "io_pinf_server_ci", "clones", function(err, clonesTable) {
                     if (err) return callback(err);
-                    return repositoryTable.get(build.repository).run(self._r.conn, function (err, repository) {
+
+                    return buildsTable.get(id).run(self._r.conn, function (err, build) {
                         if (err) return callback(err);
-
-                        var runningPingInterval = null;
-
-                        function startBuild(callback) {
-                            return buildsTable.get(build.id).update({
-                                "status": "running",
-                                "runningPing": Date.now(),
-                                "startTime": Date.now()
-                            }).run(self._r.conn, function (err, result) {
-                                if (err) return callback(err);
-                                runningPingInterval = setInterval(function() {
-                                    return buildsTable.get(build.id).update({
-                                        "runningPing": Date.now()
-                                    }).run(self._r.conn, function (err, result) {
-                                        if (err) {
-                                            // TODO: Should retry a few times before failing with error?
-                                            console.error("Error updating runningPing in db but ignoring!", err.stack);
-                                        }
-                                        // Nothing more to do.
-                                        return;
-                                    });
-                                }, 5 * 1000);
-                                return callback(null);
-                            });
-                        }
-
-                        function runBuild(callback) {
-                            return self._ensureDeployKey(repository, function(err, keyPath) {
-                                if (err) return callback(err);
-
-                                function fetchLatest(callback) {
-
-            console.log("deploy key path fetchLatest", keyPath, repository);
-
-                                    return callback(null);
-                                }
-
-                                return fetchLatest(function(err) {
-                                    if (err) return callback(err);
-
-                                    console.log("Running build ...");
-                                    return setTimeout(function () {
-
-                                        succeedFail = !succeedFail;
-                                        if (succeedFail) {
-            return callback(new Error("Build failed!"));
-                                        }
-
-                                        console.log("Build done!");
-
-                                        return callback(null);
-                                    }, 20 * 1000);
-                                });
-                            });
-                        }
-
-                        function endBuild(buildErr, callback) {
-                            if (runningPingInterval) {
-                                clearInterval(runningPingInterval);
-                                runningPingInterval = null;
-                            }
-                            var changes = {
-                                "status": "success",
-                                "endTime": Date.now()
-                            };
-                            if (buildErr) {
-                                changes.status = "fail";
-                                console.error("Build error:", buildErr.stack);
-                            }                
-                            return buildsTable.get(build.id).update(changes).run(self._r.conn, function (err, result) {
-                                if (err) {
-                                    // TODO: Should retry a few times before failing outright.
-                                    console.error("Error setting build to done but ignoring!", err.stack);
-                                }
-                                return buildsTable.get(build.id).replace(self._r.row.without("runningPing")).run(self._r.conn, function (err, result) {
-                                    if (err) {
-                                        // TODO: Should retry a few times before failing outright.
-                                        console.error("Error setting build to done but ignoring!", err.stack);
-                                    }
-                                    console.log("Build done", build.id, changes);
-                                    return callback(buildErr);
-                                });
-                            });
-                        }
-
-                        return startBuild(function(err) {
+                        return repositoryTable.get(build.repository).run(self._r.conn, function (err, repository) {
                             if (err) return callback(err);
-                            return runBuild(function(err) {
-                                return endBuild(err, callback);
+                            return clonesTable.get(build.clone).run(self._r.conn, function (err, clone) {
+                                if (err) return callback(err);
+
+                                var runningPingInterval = null;
+
+                                function startBuild(callback) {
+                                    return buildsTable.get(build.id).update({
+                                        "status": "running",
+                                        "runningPing": Date.now(),
+                                        "startTime": Date.now()
+                                    }).run(self._r.conn, function (err, result) {
+                                        if (err) return callback(err);
+                                        runningPingInterval = setInterval(function() {
+                                            return buildsTable.get(build.id).update({
+                                                "runningPing": Date.now()
+                                            }).run(self._r.conn, function (err, result) {
+                                                if (err) {
+                                                    // TODO: Should retry a few times before failing with error?
+                                                    console.error("Error updating runningPing in db but ignoring!", err.stack);
+                                                }
+                                                // Nothing more to do.
+                                                return;
+                                            });
+                                        }, 5 * 1000);
+                                        return callback(null);
+                                    });
+                                }
+
+                                function runBuild(callback) {
+                                    return self._ensureDeployKey(repository, function(err, keyPath) {
+                                        if (err) return callback(err);
+
+                                        function fetchLatest(callback) {
+                                            // TODO: Need better git repository sync logic here from `sm` command implementation.
+                                            return HELPERS.API.FS.exists(clone.path, function (exists) {
+                                                var cwd = PATH.dirname(clone.path);
+                                                var args = [
+                                                    "clone"
+                                                ];
+                                                var repositoryParts = repository.id.split("/");
+                                                if (repository.private) {
+                                                    args.push("git@github.com:" + repositoryParts[1] + "/" + repositoryParts[2] + ".git");
+                                                } else {
+                                                    args.push("https://github.com/" + repositoryParts[1] + "/" + repositoryParts[2] + ".git");
+                                                }
+                                                args.push(clone.path);
+                                                if (exists) {
+                                                    args = [
+                                                        "pull",
+                                                        "origin",
+                                                        "master"
+                                                    ];
+                                                    cwd = clone.path;
+                                                }
+
+                                                var gitSshHelperPath = PATH.join(clone.path, "..", PATH.basename(clone.path) + ".git-ssh.sh");
+                                                HELPERS.API.FS.outputFileSync(gitSshHelperPath, [
+                                                    '#!/bin/sh',
+                                                    'exec ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PasswordAuthentication=no -o IdentityFile=' + keyPath + ' "$@"'
+                                                ].join("\n"));
+                                                HELPERS.API.FS.chmodSync(gitSshHelperPath, 0755);
+
+                                                console.log("Running command: git " + args.join(" ") + " (cwd: " + cwd + ")");
+                                                var proc = SPAWN("git", args, {
+                                                    cwd: cwd,
+                                                    env: {
+                                                        PATH: process.env.PATH,
+                                                        GIT_SSH: gitSshHelperPath
+                                                    }
+                                                });
+                                                proc.stdout.on('data', function (data) {
+                                                    process.stdout.write(data);
+                                                });
+                                                proc.stderr.on('data', function (data) {
+                                                    process.stderr.write(data);
+                                                });
+                                                proc.on('close', function (code) {
+                                                    if (code !== 0) {
+                                                        console.error("ERROR: Exited with code '" + code + "'");
+                                                        return callback(new Error("Exited with code '" + code + "'"));
+                                                    }
+                                                    console.log("Finished running script!");
+                                                    return callback(null);
+                                                });                                                
+                                            });
+                                            return callback(null);
+                                        }
+
+                                        return fetchLatest(function(err) {
+                                            if (err) return callback(err);
+
+                                            console.log("Running build ...");
+                                            return setTimeout(function () {
+
+
+
+                                                console.log("Build done!");
+
+                                                return callback(null);
+                                            }, 20 * 1000);
+                                        });
+                                    });
+                                }
+
+                                function endBuild(buildErr, callback) {
+                                    if (runningPingInterval) {
+                                        clearInterval(runningPingInterval);
+                                        runningPingInterval = null;
+                                    }
+                                    var changes = {
+                                        "status": "success",
+                                        "endTime": Date.now()
+                                    };
+                                    if (buildErr) {
+                                        changes.status = "fail";
+                                        console.error("Build error:", buildErr.stack);
+                                    }                
+                                    return buildsTable.get(build.id).update(changes).run(self._r.conn, function (err, result) {
+                                        if (err) {
+                                            // TODO: Should retry a few times before failing outright.
+                                            console.error("Error setting build to done but ignoring!", err.stack);
+                                        }
+                                        return buildsTable.get(build.id).replace(self._r.row.without("runningPing")).run(self._r.conn, function (err, result) {
+                                            if (err) {
+                                                // TODO: Should retry a few times before failing outright.
+                                                console.error("Error setting build to done but ignoring!", err.stack);
+                                            }
+                                            console.log("Build done", build.id, changes);
+                                            return callback(buildErr);
+                                        });
+                                    });
+                                }
+
+                                return startBuild(function(err) {
+                                    if (err) return callback(err);
+                                    return runBuild(function(err) {
+                                        return endBuild(err, callback);
+                                    });
+                                }); 
                             });
-                        }); 
+                        });
                     });
                 });
             });
@@ -491,19 +545,25 @@ var succeedFail = true;
         var info = null;
         try {
             var payload = JSON.parse(req.body.payload);
-            var branchMatch = payload.ref.match(/^refs\/heads\/(.+)$/);
-            if (branchMatch) {
-                info = {
-                    id: "github.com/" + payload.repository.organization + "/" + payload.repository.name + "/build/" + payload.after,
-                    repository: "github.com/" + payload.repository.organization + "/" + payload.repository.name,
-                    commit: payload.after,
-                    branch: branchMatch[1],
-                    createdOn: (new Date(payload.head_commit.timestamp)).getTime(),
-                    createdBy: "github.com/" + payload.pusher.name,
-                    status: "pending"
-                };
+            if (payload.ref) {
+                var branchMatch = payload.ref.match(/^refs\/heads\/(.+)$/);
+                if (branchMatch) {
+                    info = {
+                        id: "github.com/" + payload.repository.organization + "/" + payload.repository.name + "/build/" + payload.after,
+                        repository: "github.com/" + payload.repository.organization + "/" + payload.repository.name,
+                        commit: payload.after,
+                        branch: branchMatch[1],
+                        createdOn: (new Date(payload.head_commit.timestamp)).getTime(),
+                        createdBy: "github.com/" + payload.pusher.name,
+                        status: "pending"
+                    };
+                } else {
+                    console.log("payload", JSON.stringify(payload, null, 4));
+                    console.log("Warning: Ignoring event as branch '" + payload.ref + "' could not be matched!");
+                }
             } else {
-                console.log("Warning: Ignoring event as branch '" + payload.ref + "' could not be matched!");
+                console.log("payload", JSON.stringify(payload, null, 4));
+                console.log("Warning: Ignoring event as branch '" + payload.ref + "' not set!");
             }
         } catch(err) {
             console.log("req.body.payload", req.body.payload);
@@ -681,52 +741,93 @@ var succeedFail = true;
     });
 
 
-    // TODO: Convert this into a trigger route.
-	app.use(function(req, res, next) {
+    var credentialsEnsured = false;
 
-		if (res.view && res.view.authorized) {
+    app.get(/\/ensure\/credentials$/, function(req, res, next) {
 
-			if (res.view.authorized.github) {
-                console.log("res.view.authorized", JSON.stringify(res.view.authorized, null, 4));
-                if (
-                    res.view.authorized.github.scope.indexOf("write:repo_hook") === -1 ||
-                    res.view.authorized.github.scope.indexOf("repo") === -1
-                ) {
-                    var scope = "write:repo_hook,repo";
-                    console.error("User needs more privileges to activate this service. See: https://developer.github.com/v3/oauth/#scopes");
-                    console.log("We are going to start a new oauth session with the new require scope added ...");
-                    var err = new Error("Insufficient privileges. Should start new session with added scope: " + scope);
-                    err.code = 403;
-                    err.requestScope = scope;
-                    return next(err);
-                }
+        function respond (payload) {
+            payload = JSON.stringify(payload, null, 4);
+            res.writeHead(200, {
+                "Content-Type": "application/json",
+                "Content-Length": payload.length,
+                "Cache-Control": "max-age=15"  // seconds
+            });
+            return res.end(payload);
+        }
 
-				console.log("Hook repositories with access token from user:", res.view.authorized.github.username);
+        if (credentialsEnsured) {
+            return respond({
+                "$status": 200
+            });
+        }
 
-				return hookRepositories(res.view.authorized.github, res.r, function (err) {
-					if (err) {
-						console.error("Error hooking repositories", err.stack);
-						return next(err);
-					}
-					console.log("Repository hooking done");
+        if (!res.view || !res.view.authorized) {
+            return respond({
+                "$status": 403,
+                "$statusReason": "No user authorized!"
+            });
+        }
+        if (!res.view.authorized.github) {
+            return respond({
+                "$status": 403,
+                "$statusReason": "No github user authorized!"
+            });
+        }
 
-                    console.log("Start builder ...");
-                    return ensureBuilder(res.view.authorized.github, res.r, function (err) {
-                        if (err) {
-                            console.error("Error starting builder", err.stack);
-                            return next(err);
-                        }
-                        console.log("Builder started!");
+        console.log("res.view.authorized", JSON.stringify(res.view.authorized, null, 4));
+        if (
+            res.view.authorized.github.scope.indexOf("write:repo_hook") === -1 ||
+            res.view.authorized.github.scope.indexOf("repo") === -1
+        ) {
+            var scope = "write:repo_hook,repo";
+/*
+NOTE: This works if we want to redirect the response and upgrade the scope.
+            console.error("User needs more privileges to activate this service. See: https://developer.github.com/v3/oauth/#scopes");
+            console.log("We are going to start a new oauth session with the new require scope added ...");
+            var err = new Error("Insufficient privileges. Should start new session with added scope: " + scope);
+            err.code = 403;
+            err.requestScope = scope;
+            return next(err);
+*/
 
-                        triggerBuilds();
+            return respond({
+                "$status": 403,
+                "$statusReason": "Insufficient scope",
+                "requestScope": scope
+            });
+        }
 
-                        return res.end();
+        console.log("Hook repositories with access token from user:", res.view.authorized.github.username);
+
+        return hookRepositories(res.view.authorized.github, res.r, function (err) {
+            if (err) {                
+                console.error("Error hooking repositories", err.stack);
+                return respond({
+                    "$status": 500,
+                    "$statusReason": "Error hooking repositories: " + err.stack
+                });
+            }
+            console.log("Repository hooking done");
+
+            console.log("Start builder ...");
+            return ensureBuilder(res.view.authorized.github, res.r, function (err) {
+                if (err) {
+                    return respond({
+                        "$status": 500,
+                        "$statusReason": "Error starting builder: " + err.stack
                     });
-				});
-			}
-		}
+                }
+                console.log("Builder started!");
 
-		return next();
-	});
+                triggerBuilds();
+
+                credentialsEnsured = true;
+
+                return respond({
+                    "$status": 200
+                });
+            });
+        });
+    });
 
 });
