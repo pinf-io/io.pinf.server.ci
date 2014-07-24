@@ -203,8 +203,9 @@ require("io.pinf.server.www").for(module, __dirname, function(app, config, HELPE
 
 
     var Builder = function(userInfo, r) {
-        this._userInfo = userInfo;
-        this._r = r;
+        var self = this;
+        self._userInfo = userInfo;
+        self._r = r;
         /*
         ensureBuilder__watcher = HELPERS.API.Q.denodeify(function (callback) {
             return r.tableEnsure(DB_NAME, "io_pinf_server_ci", "builds", {
@@ -236,6 +237,40 @@ console.log("CHANGES", results);
             });
         })();
         */
+
+        function checkForRunningBuildTimeouts(callback) {
+            console.log("checkForRunningBuildTimeouts()");
+            return self._r.tableEnsure(DB_NAME, "io_pinf_server_ci", "builds", {
+                indexes: [
+                    "runningPing"
+                ]
+            }, function(err, buildsTable) {
+                if (err) return callback(err);
+
+                return buildsTable.filter(r.row("runningPing").lt(Date.now() - 15 * 1000)).run(self._r.conn, function (err, cursor) {
+                    if (err) return callback(err);
+                    if (!cursor.hasNext()) {
+                        return callback(null);
+                    }
+                    return cursor.toArray(function(err, result) {
+                        if (err) return callback(err);
+
+console.log("result", result);
+
+                        return callback(null);
+                    });
+                });
+            });
+        }
+
+        setInterval(function() {
+            return checkForRunningBuildTimeouts(function (err) {
+                if (err) {
+                    console.error("WARN: Error checking running build timeouts:", err.stack);
+                }
+                return;
+            });
+        }, 15 * 1000);
     }
 
     Builder.prototype._ensureDeployKey = function (repository, callback) {
@@ -322,8 +357,6 @@ console.log("CHANGES", results);
         var self = this;
 
         console.log("Trigger build for:", id);
-
-        // TODO: Periodially cleanup hung builds. i.e. runtimePing too old.
 
         return self._r.tableEnsure(DB_NAME, "io_pinf_server_ci", "repositories", function(err, repositoryTable) {
             if (err) return callback(err);
@@ -424,18 +457,58 @@ console.log("CHANGES", results);
                                             return callback(null);
                                         }
 
+                                        function runIntegration(callback) {
+                                            if (!FS.existsSync(PATH.join(clone.path, "package.json"))) {
+                                                console.log("No package.json file found!");
+                                                return callback(null);
+                                            }
+                                            var packageDescriptor = HELPERS.API.FS.readJsonSync(PATH.join(clone.path, "package.json"));
+                                            if (
+                                                !packageDescriptor ||
+                                                !packageDescriptor.scripts ||
+                                                !packageDescriptor.scripts.integrate
+                                            ) {
+                                                console.log("No 'scripts.integrate' property declared in package.json!");
+                                                return callback(null);
+                                            }
+                                            var args = [
+                                                "run-script",
+                                                "integrate"
+                                            ];
+                                            console.log("Running command: npm " + args.join(" ") + " (cwd: " + clone.path + ")");
+                                            var proc = SPAWN("npm", args, {
+                                                cwd: clone.path,
+                                                env: {
+                                                    PATH: process.env.PATH
+                                                }
+                                            });
+                                            proc.stdout.on('data', function (data) {
+                                                process.stdout.write(data);
+                                            });
+                                            proc.stderr.on('data', function (data) {
+                                                process.stderr.write(data);
+                                            });
+                                            proc.on('close', function (code) {
+                                                if (code !== 0) {
+                                                    console.error("ERROR: Exited with code '" + code + "'");
+                                                    return callback(new Error("Exited with code '" + code + "'"));
+                                                }
+                                                console.log("Finished running integration script!");
+                                                return callback(null);
+                                            });                                              
+                                        }
+
                                         return fetchLatest(function(err) {
                                             if (err) return callback(err);
 
-                                            console.log("Running build ...");
-                                            return setTimeout(function () {
+                                            console.log("Running integration ...");
+                                            return runIntegration(function (err) {
+                                                if (err) return callback(err);
 
-
-
-                                                console.log("Build done!");
+                                                console.log("Integration done!");
 
                                                 return callback(null);
-                                            }, 20 * 1000);
+                                            });
                                         });
                                     });
                                 }
@@ -627,6 +700,9 @@ console.log("CHANGES", results);
 
 
     app.get(/\/build\/list$/, function(req, res, next) {
+
+        console.log("Build list triggered");
+
         function getRecords(callback) {
             return res.r.tableEnsure(DB_NAME, "io_pinf_server_ci", "builds", {
                 indexes: [
@@ -668,6 +744,9 @@ console.log("CHANGES", results);
 
 
     app.get(/\/clone\/list$/, function(req, res, next) {
+
+        console.log("Clone list triggered");
+
         function getRecords(callback) {
             return res.r.tableEnsure(DB_NAME, "io_pinf_server_ci", "clones", function(err, clonesTable) {
                 if (err) return callback(err);
@@ -744,6 +823,8 @@ console.log("CHANGES", results);
     var credentialsEnsured = false;
 
     app.get(/\/ensure\/credentials$/, function(req, res, next) {
+
+        console.log("Ensure credentials triggered");
 
         function respond (payload) {
             payload = JSON.stringify(payload, null, 4);
