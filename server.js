@@ -843,12 +843,14 @@ console.log("result", result);
         }
 
         if (!res.view || !res.view.authorized) {
+            console.log("No user authorized!");
             return respond({
                 "$status": 403,
                 "$statusReason": "No user authorized!"
             });
         }
         if (!res.view.authorized.github) {
+            console.log("No github user authorized!");
             return respond({
                 "$status": 403,
                 "$statusReason": "No github user authorized!"
@@ -870,7 +872,7 @@ NOTE: This works if we want to redirect the response and upgrade the scope.
             err.requestScope = scope;
             return next(err);
 */
-
+            console.log("Insufficient scope. Requesting more scope: " + scope);
             return respond({
                 "$status": 403,
                 "$statusReason": "Insufficient scope",
