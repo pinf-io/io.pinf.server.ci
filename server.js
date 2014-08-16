@@ -249,9 +249,9 @@ console.log("CHANGES", results);
 
                 return buildsTable.filter(r.row("runningPing").lt(Date.now() - 15 * 1000)).run(self._r.conn, function (err, cursor) {
                     if (err) return callback(err);
-                    if (!cursor.hasNext()) {
-                        return callback(null);
-                    }
+//                    if (!cursor.hasNext()) {
+//                        return callback(null);
+//                    }
                     return cursor.toArray(function(err, result) {
                         if (err) return callback(err);
 
@@ -575,13 +575,16 @@ console.log("result", result);
                 .orderBy(self._r.asc("createdOn"))
                 .run(self._r.conn, function(err, cursor) {
                     if (err) return callback(err);
-                    if (cursor.hasNext()) {
+//                    if (cursor.hasNext()) {
                         return cursor.toArray(function(err, results) {
                             if (err) return callback(err);
+                            if (results.length === 0) {
+                                return callback(null);
+                            }
                             return self._doBuild(results.pop().reduction.id, callback);
                         });
-                    }
-                    return callback(null);
+//                    }
+//                    return callback(null);
                 });
             });
         }
@@ -666,13 +669,18 @@ console.log("result", result);
                             ).run(r.conn, function (err, cursor) {
                                 if (err) return next(err);
 
-                                if (!cursor.hasNext()) {
-                                    console.log("Ignore record new build for repository '" + info.repository + "' as there are no clones for the branch '" + info.branch + "'!", info);
-                                    return res.end();
-                                }
+//                                if (!cursor.hasNext()) {
+//                                    console.log("Ignore record new build for repository '" + info.repository + "' as there are no clones for the branch '" + info.branch + "'!", info);
+//                                    return res.end();
+//                                }
 
                                 return cursor.toArray(function(err, results) {
                                     if (err) return callback(err);
+
+                                    if (results.length === 0) {
+                                        console.log("Ignore record new build for repository '" + info.repository + "' as there are no clones for the branch '" + info.branch + "'!", info);
+                                        return res.end();
+                                    }
 
                                     var builds = results.map(function(clone) {
                                         var build = JSON.parse(JSON.stringify(info));
@@ -716,9 +724,9 @@ console.log("result", result);
                 .limit(25)
                 .run(res.r.conn, function(err, cursor) {
                     if (err) return callback(err);
-                    if (!cursor.hasNext()) {
-                        return callback(null, {});
-                    }
+//                    if (!cursor.hasNext()) {
+//                        return callback(null, {});
+//                    }
                     return cursor.toArray(function(err, results) {
                         if (err) return callback(err);
                         var records = {};
@@ -758,9 +766,9 @@ console.log("result", result);
                     if (err) return callback(err);
                     return clonesTable.orderBy(res.r.asc("path")).run(res.r.conn, function(err, clonesCursor) {
                         if (err) return callback(err);
-                        if (!clonesCursor.hasNext()) {
-                            return callback(null, {});
-                        }
+//                        if (!clonesCursor.hasNext()) {
+//                            return callback(null, {});
+//                        }
                         return clonesCursor.toArray(function(err, clonesResults) {
                             if (err) return callback(err);
 
@@ -774,9 +782,9 @@ console.log("result", result);
                                 .map(res.r.row("reduction"))
                                 .run(res.r.conn, function(err, buildsCursor) {
                                     if (err) return callback(err);
-                                    if (!buildsCursor.hasNext()) {
-                                        return callback(null, {});
-                                    }
+//                                    if (!buildsCursor.hasNext()) {
+//                                        return callback(null, {});
+//                                    }
                                     return buildsCursor.toArray(function(err, results) {
                                         var builds = {};
                                         results.forEach(function(result) {
