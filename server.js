@@ -397,7 +397,41 @@ console.log("result", result);
                                     });
                                 }
 
-                                function runBuild(callback) {
+                                function runBuild(_callback) {
+
+                                    console.log("\n\n########## RUN BUILD ##########\n\n")
+
+                                    var logPath = "/opt/data/io.pinf.server.ci/builds/build-" + Date.now() + "-" + build.id.replace(/\//g, "~") + ".log";
+                                    console.log("Using log file:", logPath);
+                                    if (!FS.existsSync(PATH.dirname(logPath))) {
+                                        HELPERS.API.FS.mkdirsSync(PATH.dirname(logPath));
+                                    }
+                                    var logStream = FS.createWriteStream(logPath, {
+                                        flags: "a",
+                                        encoding: "utf8"
+                                    });
+                                    logStream.on("error", function (err) {
+                                        return _callback(err);
+                                    });
+                                    logStream.on("finish", function () {
+                                        return _callback();
+                                    });
+                                    var logging = null;
+                                    function write(buffer) {
+                                        return (logging = HELPERS.API.Q.ninvoke(logStream, "write", buffer, "utf8"));
+                                    }
+                                    function writeLine(line) {
+                                        return (logging = HELPERS.API.Q.ninvoke(logStream, "write", line + "\n", "utf8"));
+                                    }
+                                    function callback (err) {
+                                        if (!logging) {
+                                            return logStream.end();
+                                        }
+                                        return logging.finally(function () {
+                                            return logStream.end();
+                                        });
+                                    }
+
                                     return self._ensureDeployKey(repository, function(err, keyPath) {
                                         if (err) return callback(err);
 
@@ -432,6 +466,8 @@ console.log("result", result);
                                                 HELPERS.API.FS.chmodSync(gitSshHelperPath, 0755);
 
                                                 console.log("Running command: git " + args.join(" ") + " (cwd: " + cwd + ")");
+                                                logLine("----- Fetch latest START ----- ");
+                                                logLine("Running command: git " + args.join(" ") + " (cwd: " + cwd + ")");
                                                 var proc = SPAWN("git", args, {
                                                     cwd: cwd,
                                                     env: {
@@ -441,9 +477,11 @@ console.log("result", result);
                                                 });
                                                 proc.stdout.on('data', function (data) {
                                                     process.stdout.write(data);
+                                                    write(data);
                                                 });
                                                 proc.stderr.on('data', function (data) {
                                                     process.stderr.write(data);
+                                                    write(data);
                                                 });
                                                 proc.on('close', function (code) {
                                                     if (code !== 0) {
@@ -451,6 +489,7 @@ console.log("result", result);
                                                         return callback(new Error("Exited with code '" + code + "'"));
                                                     }
                                                     console.log("Finished running script!");
+                                                    logLine("----- Fetch latest DONE ----- ");
                                                     return callback(null);
                                                 });                                                
                                             });
@@ -476,6 +515,8 @@ console.log("result", result);
                                                 "integrate"
                                             ];
                                             console.log("Running command: npm " + args.join(" ") + " (cwd: " + clone.path + ")");
+                                            logLine("----- Run integration START ----- ");
+                                            logLine("Running command: npm " + args.join(" ") + " (cwd: " + clone.path + ")");
                                             var proc = SPAWN("npm", args, {
                                                 cwd: clone.path,
                                                 env: {
@@ -484,9 +525,11 @@ console.log("result", result);
                                             });
                                             proc.stdout.on('data', function (data) {
                                                 process.stdout.write(data);
+                                                write(data);
                                             });
                                             proc.stderr.on('data', function (data) {
                                                 process.stderr.write(data);
+                                                write(data);
                                             });
                                             proc.on('close', function (code) {
                                                 if (code !== 0) {
@@ -494,6 +537,7 @@ console.log("result", result);
                                                     return callback(new Error("Exited with code '" + code + "'"));
                                                 }
                                                 console.log("Finished running integration script!");
+                                                logLine("----- Run integration DONE ----- ");
                                                 return callback(null);
                                             });                                              
                                         }
