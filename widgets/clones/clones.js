@@ -65,8 +65,10 @@ define(function() {
 										if (row[0].nodeName === "BUTTON") return;
 										if (row.attr("record-id")) break;
 									}
-console.log("Select clone:", row.attr("record-id"));
-//									return self.parent.api.showRawLogDialog("service", row.attr("record-id"));
+									window.API.helpers.showLogDialog(records[row.attr("record-id")].logPath, {
+										updateUrlHash: false
+									});
+									return false;
 								});
 							});
 						});

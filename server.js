@@ -247,7 +247,7 @@ console.log("CHANGES", results);
             }, function(err, buildsTable) {
                 if (err) return callback(err);
 
-                return buildsTable.filter(r.row("runningPing").lt(Date.now() - 15 * 1000)).run(self._r.conn, function (err, cursor) {
+                return buildsTable.filter(r.row("runningPing").lt(Date.now() - 15 * 1000).and(r.row("status").eq("running"))).run(self._r.conn, function (err, cursor) {
                     if (err) return callback(err);
 //                    if (!cursor.hasNext()) {
 //                        return callback(null);
@@ -255,9 +255,25 @@ console.log("CHANGES", results);
                     return cursor.toArray(function(err, result) {
                         if (err) return callback(err);
 
-console.log("result", result);
+                        if (result.length === 0) {
+                            console.log("No long running builds!");
+                            return callback(null);
+                        }
 
-                        return callback(null);
+                        var waitfor = WAITFOR.parallel(callback);
+                        result.forEach(function (build) {
+                            waitfor(function (done) {
+                                console.log("Timeout build:", JSON.stringify(build, null, 4));
+                                return buildsTable.get(build.id).update({
+                                    "status": "timeout",
+                                    "endTime": Date.now()
+                                }).run(self._r.conn, function (err, result) {
+                                    if (err) return done(err);
+                                    return done();
+                                });
+                            });
+                        });
+                        return waitfor();
                     });
                 });
             });
@@ -374,11 +390,19 @@ console.log("result", result);
 
                                 var runningPingInterval = null;
 
+
+                                console.log("\n\n########## BUILD ##########\n\n")
+
+                                var logPath = "/opt/data/io.pinf.server.ci/builds/build-" + Date.now() + "-" + build.id.replace(/\//g, "~") + ".log";
+                                console.log("Using log file:", logPath);
+
+
                                 function startBuild(callback) {
                                     return buildsTable.get(build.id).update({
                                         "status": "running",
                                         "runningPing": Date.now(),
-                                        "startTime": Date.now()
+                                        "startTime": Date.now(),
+                                        "logPath": logPath
                                     }).run(self._r.conn, function (err, result) {
                                         if (err) return callback(err);
                                         runningPingInterval = setInterval(function() {
@@ -399,10 +423,6 @@ console.log("result", result);
 
                                 function runBuild(_callback) {
 
-                                    console.log("\n\n########## RUN BUILD ##########\n\n")
-
-                                    var logPath = "/opt/data/io.pinf.server.ci/builds/build-" + Date.now() + "-" + build.id.replace(/\//g, "~") + ".log";
-                                    console.log("Using log file:", logPath);
                                     if (!FS.existsSync(PATH.dirname(logPath))) {
                                         HELPERS.API.FS.mkdirsSync(PATH.dirname(logPath));
                                     }
@@ -466,8 +486,8 @@ console.log("result", result);
                                                 HELPERS.API.FS.chmodSync(gitSshHelperPath, 0755);
 
                                                 console.log("Running command: git " + args.join(" ") + " (cwd: " + cwd + ")");
-                                                logLine("----- Fetch latest START ----- ");
-                                                logLine("Running command: git " + args.join(" ") + " (cwd: " + cwd + ")");
+                                                writeLine("----- Fetch latest START ----- ");
+                                                writeLine("Running command: git " + args.join(" ") + " (cwd: " + cwd + ")");
                                                 var proc = SPAWN("git", args, {
                                                     cwd: cwd,
                                                     env: {
@@ -489,7 +509,7 @@ console.log("result", result);
                                                         return callback(new Error("Exited with code '" + code + "'"));
                                                     }
                                                     console.log("Finished running script!");
-                                                    logLine("----- Fetch latest DONE ----- ");
+                                                    writeLine("----- Fetch latest DONE ----- ");
                                                     return callback(null);
                                                 });                                                
                                             });
@@ -515,8 +535,8 @@ console.log("result", result);
                                                 "integrate"
                                             ];
                                             console.log("Running command: npm " + args.join(" ") + " (cwd: " + clone.path + ")");
-                                            logLine("----- Run integration START ----- ");
-                                            logLine("Running command: npm " + args.join(" ") + " (cwd: " + clone.path + ")");
+                                            writeLine("----- Run integration START ----- ");
+                                            writeLine("Running command: npm " + args.join(" ") + " (cwd: " + clone.path + ")");
                                             var proc = SPAWN("npm", args, {
                                                 cwd: clone.path,
                                                 env: {
@@ -537,7 +557,7 @@ console.log("result", result);
                                                     return callback(new Error("Exited with code '" + code + "'"));
                                                 }
                                                 console.log("Finished running integration script!");
-                                                logLine("----- Run integration DONE ----- ");
+                                                writeLine("----- Run integration DONE ----- ");
                                                 return callback(null);
                                             });                                              
                                         }
