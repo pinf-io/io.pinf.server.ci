@@ -540,7 +540,9 @@ console.log("CHANGES", results);
                                             var proc = SPAWN("npm", args, {
                                                 cwd: clone.path,
                                                 env: {
-                                                    PATH: process.env.PATH
+                                                    PATH: process.env.PATH,
+                                                    PIO_SEED_SALT: pioConfig.env.PIO_SEED_SALT,
+                                                    PIO_SEED_KEY: pioConfig.env.PIO_SEED_KEY
                                                 }
                                             });
                                             proc.stdout.on('data', function (data) {
